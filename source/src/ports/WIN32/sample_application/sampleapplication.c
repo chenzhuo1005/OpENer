@@ -24,6 +24,12 @@
 #define DEMO_APP_HEARTBEAT_LISTEN_ONLY_ASSEMBLY_NUM 153 //0x099
 #define DEMO_APP_EXPLICT_ASSEMBLY_NUM              154 //0x09A
 
+// LCU Assemblies
+#define LCU_APP_INPUT_ASSEMBLY_NUM                 102 //0x066
+#define LCU_APP_OUTPUT_ASSEMBLY_NUM                101 //0x065
+#define LCU_APP_CONFIG_ASSEMBLY_NUM                103 //0x067
+#define LCU_APP_HEARTBEAT_INPUT_ONLY_ASSEMBLY_NUM  254 //0x0FE
+
 /* local functions */
 
 /* global variables for demo application (4 assembly data fields)  ************/
@@ -32,8 +38,12 @@ EipUint8 g_assembly_data064[32]; /* Input */
 EipUint8 g_assembly_data096[32]; /* Output */
 EipUint8 g_assembly_data097[10]; /* Config */
 EipUint8 g_assembly_data09A[32]; /* Explicit */
+EipUint8 g_assembly_data_lcu_to_tcms[126]; /* Cip input message from LCU to TCMS (1008 bits) */
+EipUint8 g_assembly_data_tcms_to_lcu[233]; /* Cip output message from TCMS to LCU (1864 bits) */
+EipUint8 g_assembly_data_config[10];      /* Config */
 
 EipStatus ApplicationInitialization(void) {
+  printf("HZY LCU CIP Application Initialization\n");
   /* create 3 assembly object instances*/
   /*INPUT*/
   CreateAssemblyObject( DEMO_APP_INPUT_ASSEMBLY_NUM, &g_assembly_data064[0],
@@ -57,7 +67,22 @@ EipStatus ApplicationInitialization(void) {
   CreateAssemblyObject( DEMO_APP_EXPLICT_ASSEMBLY_NUM, &g_assembly_data09A[0],
                         sizeof(g_assembly_data09A) );
 
-  ConfigureExclusiveOwnerConnectionPoint(0, DEMO_APP_OUTPUT_ASSEMBLY_NUM,
+  /* LCU Cip input message from LCU to TCMS */
+  CreateAssemblyObject( LCU_APP_INPUT_ASSEMBLY_NUM, &g_assembly_data_lcu_to_tcms[0],
+                        sizeof(g_assembly_data_lcu_to_tcms) );
+
+  /* LCU Cip output message from TCMS to LCU */
+  CreateAssemblyObject( LCU_APP_OUTPUT_ASSEMBLY_NUM, &g_assembly_data_tcms_to_lcu[0],
+                        sizeof(g_assembly_data_tcms_to_lcu) );
+
+  /* LCU Cip Config if any*/
+  CreateAssemblyObject( LCU_APP_CONFIG_ASSEMBLY_NUM, &g_assembly_data_config[0],
+                        sizeof(g_assembly_data_config) );
+
+  /* LCU Heart-beat output assembly for Input only connections */
+  CreateAssemblyObject(LCU_APP_HEARTBEAT_INPUT_ONLY_ASSEMBLY_NUM, 0, 0);
+
+  /* ConfigureExclusiveOwnerConnectionPoint(0, DEMO_APP_OUTPUT_ASSEMBLY_NUM,
                                          DEMO_APP_INPUT_ASSEMBLY_NUM,
                                          DEMO_APP_CONFIG_ASSEMBLY_NUM);
   ConfigureInputOnlyConnectionPoint(0,
@@ -67,7 +92,19 @@ EipStatus ApplicationInitialization(void) {
   ConfigureListenOnlyConnectionPoint(0,
                                      DEMO_APP_HEARTBEAT_LISTEN_ONLY_ASSEMBLY_NUM,
                                      DEMO_APP_INPUT_ASSEMBLY_NUM,
-                                     DEMO_APP_CONFIG_ASSEMBLY_NUM);
+                                     DEMO_APP_CONFIG_ASSEMBLY_NUM);*/
+
+  /* LCU MPU Master connection */
+  ConfigureExclusiveOwnerConnectionPoint(0, 
+                                         LCU_APP_OUTPUT_ASSEMBLY_NUM,
+                                         LCU_APP_INPUT_ASSEMBLY_NUM,
+                                         LCU_APP_CONFIG_ASSEMBLY_NUM);
+
+  /* LCU MPU Slave connection */
+  ConfigureInputOnlyConnectionPoint(0, 
+                                    LCU_APP_HEARTBEAT_INPUT_ONLY_ASSEMBLY_NUM,
+                                    LCU_APP_INPUT_ASSEMBLY_NUM,
+                                    LCU_APP_CONFIG_ASSEMBLY_NUM);
 
   /* For NV data support connect callback functions for each object class with
    *  NV data.
@@ -130,6 +167,7 @@ void CheckIoConnectionEvent(unsigned int pa_unOutputAssembly,
 
 EipStatus AfterAssemblyDataReceived(CipInstance *pa_pstInstance) {
   EipStatus nRetVal = kEipStatusOk;
+  // printf("Assembly Data Received. instance number=%d\n", pa_pstInstance->instance_number);
 
   /*handle the data received e.g., update outputs of the device */
   switch (pa_pstInstance->instance_number) {
@@ -151,6 +189,10 @@ EipStatus AfterAssemblyDataReceived(CipInstance *pa_pstInstance) {
        */
       nRetVal = kEipStatusOk;
       break;
+    case LCU_APP_OUTPUT_ASSEMBLY_NUM:
+      printf("LCU_APP_OUTPUT_ASSEMBLY Data Received. instance number=%d, data=%s\n", pa_pstInstance->instance_number, &g_assembly_data_tcms_to_lcu[0]);
+      // TODO: write into redis
+      break;
   }
   return nRetVal;
 }
@@ -161,11 +203,22 @@ EipBool8 BeforeAssemblyDataSend(CipInstance *pa_pstInstance) {
    * therefore we need nothing to do here. Just return true to inform that
    * the data is new.
    */
-
-  if (pa_pstInstance->instance_number == DEMO_APP_EXPLICT_ASSEMBLY_NUM) {
-    /* do something interesting with the existing data
-     * for the explicit get-data-attribute message */
+  switch (pa_pstInstance->instance_number) {
+    case DEMO_APP_EXPLICT_ASSEMBLY_NUM: {
+      /* do something interesting with the existing data
+       * for the explicit get-data-attribute message */
+      char *str = "Hello World";
+      int len = strlen(str);
+      memcpy(&g_assembly_data09A[0], str, 32);
+      break;
+    }
+    case LCU_APP_INPUT_ASSEMBLY_NUM: {
+      // TODO: read from redis
+      printf("LCU_APP_INPUT_ASSEMBLY Data Sent. instance number=%d, data=%s\n", pa_pstInstance->instance_number, &g_assembly_data_lcu_to_tcms[0]);
+      break;
+    }
   }
+
   return true;
 }
 
